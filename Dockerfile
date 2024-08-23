@@ -1,21 +1,23 @@
-FROM mcr.microsoft.com/dotnet/sdk:7.0 AS builder
+FROM mcr.microsoft.com/dotnet/runtime:8.0 AS base
 WORKDIR /app
+EXPOSE 80
 
-# caches restore result by copying csproj file separately
-COPY *.csproj .
+USER app
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+ARG configuration=Release
+WORKDIR /src
+COPY *.csproj ./
 RUN dotnet restore
 
 COPY . .
-RUN dotnet publish --output /app/ --configuration Release --no-restore
-RUN sed -n 's:.*<AssemblyName>\(.*\)</AssemblyName>.*:\1:p' *.csproj > __assemblyname
-RUN if [ ! -s __assemblyname ]; then filename=$(ls *.csproj); echo ${filename%.*} > __assemblyname; fi
+WORKDIR "/src/."
+RUN dotnet build "App2.csproj" -c $configuration -o /app/build
 
-# Stage 2
-FROM mcr.microsoft.com/dotnet/aspnet:7.0
+FROM build AS publish
+ARG configuration=Release
+RUN dotnet publish "App2.csproj" -c $configuration -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
 WORKDIR /app
-COPY --from=builder /app .
-
-ENV PORT 5000
-EXPOSE 5000
-
-ENTRYPOINT dotnet $(cat /app/__assemblyname).dll --urls "http://*:5000"
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "App2.dll"]
